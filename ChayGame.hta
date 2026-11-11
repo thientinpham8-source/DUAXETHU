@@ -1,0 +1,481 @@
+﻿<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta charset="utf-8">
+<title>Đua Xe Thú</title>
+<hta:application
+  id="launcher"
+  applicationname="DuaXeThu"
+  border="none"
+  caption="no"
+  sysmenu="no"
+  maximizebutton="no"
+  minimizebutton="no"
+  scroll="no"
+  contextmenu="no"
+  selection="no"
+  showintaskbar="yes"
+  singleinstance="yes"
+  icon="assets\share\favicon.png"
+/>
+<style type="text/css">
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #1b1838; color: #ffffff; cursor: default;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  }
+  #card { position: absolute; left: 0; top: 0; right: 0; bottom: 0; border: 1px solid #302b55; }
+  #barwin { position: relative; height: 58px; }
+  #title { position: absolute; left: 26px; top: 16px; font-size: 22px; font-weight: bold; color: #ffd35c; }
+  #btnClose {
+    position: absolute; right: 6px; top: 10px; width: 34px; height: 30px;
+    line-height: 30px; text-align: center; font-size: 12px; color: #8888aa; cursor: pointer;
+  }
+  #btnClose:hover { color: #f87171; }
+  #sub { margin: 0 26px; font-size: 12px; color: #8888aa; }
+  #track {
+    position: relative; height: 12px; margin: 26px 26px 0 26px;
+    background: #252148; border-radius: 6px; overflow: hidden;
+  }
+  #fill { position: absolute; left: 0; top: 0; width: 0; height: 12px; background: #ffd35c; border-radius: 6px; }
+  #fill.ok { background: #4ade80; }
+  #fill.err { background: #f87171; }
+  #pct { margin: 4px 26px 0 0; text-align: right; font-size: 11px; font-weight: bold; color: #ffd35c; }
+  #pct.ok { color: #4ade80; }
+  #pct.err { color: #f87171; }
+  #status { margin: 8px 26px 0 26px; font-size: 13px; color: #ffffff; }
+  #status.ok { color: #4ade80; }
+  #status.err { color: #f87171; }
+  #hint { margin: 6px 26px 0 26px; font-size: 11px; color: #8888aa; }
+  #hint.ok { color: #4ade80; }
+  #hint.err { color: #f87171; }
+  .btn {
+    position: absolute; bottom: 22px; height: 40px; line-height: 40px; text-align: center;
+    font-size: 13px; border-radius: 6px; background: #2a2650; color: #ffffff;
+    cursor: pointer; display: none;
+  }
+  .btn:hover { background: #3a3670; }
+  .btn.show { display: block; }
+  #btnOpen { left: 26px; width: 290px; }
+  #btnStop { right: 26px; width: 208px; color: #f87171; }
+  #btnStop:hover { background: #3a2535; }
+</style>
+</head>
+<body>
+  <div id="card">
+    <div id="barwin">
+      <span id="title">Đua Xe Thú</span>
+      <span id="btnClose" title="Đóng">&#10005;</span>
+    </div>
+    <div id="sub">Đua kart 3D cùng sáu thú con đáng yêu — Thung lũng Kẹo Ngọt</div>
+    <div id="track"><div id="fill"></div></div>
+    <div id="pct">0 %</div>
+    <div id="status">Đang chuẩn bị...</div>
+    <div id="hint">Lần chạy đầu tiên sẽ tự cài thư viện, có thể mất khoảng một phút.</div>
+    <div id="btnOpen" class="btn">Mở trình duyệt</div>
+    <div id="btnStop" class="btn">Dừng và Thoát</div>
+  </div>
+
+<script language="VBScript">
+' ============================================================
+'  ChayGame.hta — Đua Xe Thú, bộ chạy một-cú-nhấn
+'
+'  Nhấn đúp vào đúng file này: cửa sổ Loading hiện ra, toàn bộ
+'  cửa sổ cmd (pnpm install / pnpm dev) chạy ẩn hoàn toàn, và
+'  trình duyệt tự mở khi server sẵn sàng. Đóng cửa sổ để tắt server.
+' ============================================================
+Option Explicit
+
+Const WIN_W    = 560
+Const WIN_H    = 320
+Const GAME_URL = "http://127.0.0.1:3000"
+
+Dim gShell, gFso, gHttp
+Dim gBase, gTmp, gTok
+Dim gPhase, gPct, gTarget, gTick, gReady, gOwn, gKilled
+Dim gLogFile, gDoneFile, gServerLog
+Dim gDrag, gDragX, gDragY, gWinX, gWinY
+
+' ------------------------------------------------------------
+'  Tiện ích nhỏ
+' ------------------------------------------------------------
+Function CQuote(s)
+    CQuote = """" & s & """"
+End Function
+
+Function MinNum(a, b)
+    If a < b Then MinNum = a Else MinNum = b
+End Function
+
+Function MaxNum(a, b)
+    If a > b Then MaxNum = a Else MaxNum = b
+End Function
+
+' Chỉ giữ lại chữ số (echo của cmd thêm CRLF vào file marker)
+Function CleanNum(s)
+    Dim i, ch, out
+    out = ""
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If ch >= "0" And ch <= "9" Then out = out & ch
+    Next
+    CleanNum = out
+End Function
+
+Function ReadText(path)
+    Dim ts
+    ReadText = ""
+    If Len(path) = 0 Then Exit Function
+    On Error Resume Next
+    Set ts = gFso.OpenTextFile(path, 1, False)
+    If Err.Number = 0 Then
+        ReadText = ts.ReadAll
+        ts.Close
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+Sub SetText(id, value)
+    Dim el
+    Set el = document.getElementById(id)
+    If Not (el Is Nothing) Then el.innerHTML = value
+End Sub
+
+Sub SetClass(id, value)
+    Dim el
+    Set el = document.getElementById(id)
+    If Not (el Is Nothing) Then el.className = value
+End Sub
+
+Sub SetStatus(msg)
+    SetText "status", msg
+End Sub
+
+' ------------------------------------------------------------
+'  Đường dẫn làm việc
+' ------------------------------------------------------------
+Function BaseFolder()
+    Dim href
+    href = location.href
+    If LCase(Left(href, 7)) = "file://" Then href = Mid(href, 8)
+    If Left(href, 1) = "/" Then href = Mid(href, 2)
+    href = Replace(href, "/", "\")
+    href = Replace(href, "%20", " ")
+    BaseFolder = gFso.GetParentFolderName(href)
+End Function
+
+Sub TempName(kind)
+    gLogFile  = gTmp & "\" & gTok & "-" & kind & ".log"
+    gDoneFile = gTmp & "\" & gTok & "-" & kind & ".done"
+End Sub
+
+' ------------------------------------------------------------
+'  Điều khiển tiến trình — luôn chạy ẩn, không hiện cmd
+' ------------------------------------------------------------
+Sub RunHidden(cmdLine)
+    On Error Resume Next
+    gShell.CurrentDirectory = gBase
+    gShell.Run cmdLine, 0, False
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+' Chỉ tắt đúng những tiến trình do chính launcher này sinh ra
+' (nhận diện qua token duy nhất nằm trong command line).
+Sub KillOurProcesses()
+    Dim svc, col, p
+    If gKilled Then Exit Sub
+    gKilled = True
+    If Not gOwn Then Exit Sub
+    On Error Resume Next
+    Set svc = GetObject("winmgmts:\\.\root\cimv2")
+    Set col = svc.ExecQuery("SELECT ProcessId FROM Win32_Process WHERE CommandLine LIKE '%" & gTok & "%'")
+    For Each p In col
+        gShell.Run "taskkill.exe /F /T /PID " & p.ProcessId, 0, True
+    Next
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+' ------------------------------------------------------------
+'  Kiểm tra server đã lên chưa
+' ------------------------------------------------------------
+Function EnsureHttp()
+    EnsureHttp = False
+    On Error Resume Next
+    If gHttp Is Nothing Then Set gHttp = CreateObject("WinHttp.WinHttpRequest.5.1")
+    If Err.Number = 0 Then EnsureHttp = Not (gHttp Is Nothing)
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+Function HttpUp()
+    Dim st
+    HttpUp = False
+    If Not EnsureHttp() Then Exit Function
+    On Error Resume Next
+    gHttp.SetTimeouts 500, 500, 900, 900
+    gHttp.Open "GET", GAME_URL, False
+    gHttp.Send
+    If Err.Number = 0 Then
+        st = gHttp.Status
+        If st >= 200 And st < 400 Then HttpUp = True
+    End If
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+' ------------------------------------------------------------
+'  Trạng thái giao diện
+' ------------------------------------------------------------
+Sub DrawBar()
+    Dim ip, el
+    ip = Int(gPct)
+    If ip < 0 Then ip = 0
+    If ip > 100 Then ip = 100
+    Set el = document.getElementById("fill")
+    If Not (el Is Nothing) Then el.style.width = CStr(ip) & "%"
+    SetText "pct", CStr(ip) & " %"
+End Sub
+
+Sub OpenBrowser()
+    On Error Resume Next
+    gShell.Run GAME_URL, 1, False
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+Sub MarkReady(weStarted)
+    gOwn    = weStarted
+    gReady  = True
+    gTarget = 100
+    SetClass "fill", "ok"
+    SetClass "pct", "ok"
+    SetClass "status", "ok"
+    SetClass "hint", "ok"
+    SetStatus "Game đang chạy tại " & GAME_URL
+    SetText "hint", "Đóng cửa sổ này để tắt server"
+    SetClass "btnOpen", "btn show"
+    SetClass "btnStop", "btn show"
+    window.focus
+    OpenBrowser
+End Sub
+
+Sub Fail(msg)
+    gReady  = True
+    gTarget = 100
+    SetClass "fill", "err"
+    SetClass "pct", "err"
+    SetClass "status", "err"
+    SetClass "hint", "err"
+    SetStatus msg
+    If Len(gServerLog) > 0 Then
+        SetText "hint", "Log: " & gServerLog
+    Else
+        SetText "hint", "Cần cài Node.js (nodejs.org) và pnpm, sau đó mở lại file này."
+    End If
+    SetClass "btnStop", "btn show"
+    SetText "btnStop", "Đóng"
+End Sub
+
+' ------------------------------------------------------------
+'  Các pha khởi động (không bao giờ chặn giao diện)
+' ------------------------------------------------------------
+Sub StartInstall()
+    gPhase = "install"
+    TempName "install"
+    RunHidden "cmd.exe /v:on /c pnpm install > " & CQuote(gLogFile) & " 2>&1 & echo !errorlevel! > " & CQuote(gDoneFile)
+    SetStatus "Đang cài đặt thư viện (lần chạy đầu)..."
+    gTarget = 40
+End Sub
+
+Sub StartServer()
+    gPhase = "server"
+    gOwn   = True
+    gServerLog = gTmp & "\" & gTok & "-server.log"
+    RunHidden "cmd.exe /c pnpm dev > " & CQuote(gServerLog) & " 2>&1"
+    SetStatus "Đang khởi động server..."
+    gTarget = 60
+End Sub
+
+Sub AfterCheck()
+    If gFso.FolderExists(gBase & "\node_modules") Then
+        StartServer
+    Else
+        StartInstall
+    End If
+End Sub
+
+' ------------------------------------------------------------
+'  Vòng lặp Loading
+' ------------------------------------------------------------
+Sub OnTick()
+    Dim gap, rc, limit, dots
+
+    gTick = gTick + 1
+
+    ' thanh Loading chạy mượt (ease-out)
+    If gPct < gTarget Then
+        gap = gTarget - gPct
+        gPct = gPct + MaxNum(0.2, gap * 0.055)
+        If gPct > gTarget Then gPct = gTarget
+    End If
+    DrawBar
+
+    If gReady Then Exit Sub
+
+    ' hết thời gian chờ: pha cài đặt thư viện được nới rộng hơn
+    If gPhase = "install" Then
+        limit = 4000
+    Else
+        limit = 1400
+    End If
+    If gTick > limit Then
+        If InStr(LCase(ReadText(gServerLog)), "already in use") > 0 Then
+            Fail "Cổng 3000 đang bị chiếm. Hãy tắt tiến trình cũ rồi mở lại."
+        Else
+            Fail "Quá thời gian chờ. Kiểm tra lại project hoặc xem log."
+        End If
+        Exit Sub
+    End If
+
+    Select Case gPhase
+        Case "check"
+            If gFso.FileExists(gDoneFile) Then
+                rc = CleanNum(ReadText(gDoneFile))
+                If rc = "0" Then
+                    AfterCheck
+                Else
+                    Fail "Không tìm thấy pnpm. Cần cài Node.js và pnpm trước."
+                End If
+            ElseIf gTick > 200 Then
+                Fail "Không tìm thấy pnpm. Cần cài Node.js và pnpm trước."
+            End If
+
+        Case "install"
+            gTarget = MinNum(55, gTarget + 0.08)
+            If gFso.FileExists(gDoneFile) Then
+                rc = CleanNum(ReadText(gDoneFile))
+                If rc = "0" Then
+                    StartServer
+                Else
+                    Fail "Cài đặt thư viện thất bại (mã " & rc & ")."
+                End If
+            Else
+                dots = String(((gTick \ 6) Mod 3) + 1, ".")
+                SetStatus "Đang cài đặt thư viện" & dots
+            End If
+
+        Case "server"
+            gTarget = MinNum(92, gTarget + 0.06)
+            If (gTick Mod 5) = 0 Then
+                dots = String(((gTick \ 5) Mod 3) + 1, ".")
+                SetStatus "Đang khởi động server" & dots
+                If HttpUp() Then MarkReady True
+            End If
+    End Select
+End Sub
+
+' ------------------------------------------------------------
+'  Kéo cửa sổ / đóng cửa sổ
+' ------------------------------------------------------------
+Sub BarMouseDown()
+    gDrag = True
+    gDragX = window.event.screenX
+    gDragY = window.event.screenY
+    gWinX  = window.screenLeft
+    gWinY  = window.screenTop
+End Sub
+
+Sub DocMouseMove()
+    Dim nx, ny
+    If Not gDrag Then Exit Sub
+    nx = gWinX + (window.event.screenX - gDragX)
+    ny = gWinY + (window.event.screenY - gDragY)
+    window.moveTo nx, ny
+End Sub
+
+Sub DocMouseUp()
+    gDrag = False
+End Sub
+
+' Đóng cửa sổ = dừng server (chỉ tắt tiến trình do launcher này tạo)
+Sub CloseAll()
+    KillOurProcesses
+    window.close
+End Sub
+
+Sub Window_OnUnload()
+    KillOurProcesses
+End Sub
+
+' ------------------------------------------------------------
+'  Khởi động
+' ------------------------------------------------------------
+Sub Window_OnLoad()
+    Dim cx, cy
+
+    Set gShell = CreateObject("WScript.Shell")
+    Set gFso   = CreateObject("Scripting.FileSystemObject")
+    Set gHttp  = Nothing
+
+    gBase = BaseFolder()
+    gTmp  = gFso.GetSpecialFolder(2)
+    gTok  = "duaxe-" & CStr(CLng(Timer * 1000))
+
+    gPhase     = "probe"
+    gPct       = 0
+    gTarget    = 6
+    gTick      = 0
+    gReady     = False
+    gOwn       = False
+    gKilled    = False
+    gDrag      = False
+    gLogFile   = ""
+    gDoneFile  = ""
+    gServerLog = ""
+
+    cx = (screen.availWidth - WIN_W) \ 2
+    cy = (screen.availHeight - WIN_H) \ 3
+    window.resizeTo WIN_W, WIN_H
+    window.moveTo cx, cy
+    window.focus
+
+    If HttpUp() Then
+        ' game đang chạy sẵn: chỉ mở trình duyệt, không tạo server mới
+        gOwn = False
+        MarkReady False
+    Else
+        gPhase = "check"
+        TempName "check"
+        RunHidden "cmd.exe /v:on /c where pnpm > " & CQuote(gLogFile) & " 2>&1 & echo !errorlevel! > " & CQuote(gDoneFile)
+        SetStatus "Đang kiểm tra Node.js / pnpm..."
+        gTarget = 14
+    End If
+
+    window.setInterval "OnTick()", 60
+End Sub
+</script>
+
+<script language="VBScript" for="barwin" event="onmousedown">
+BarMouseDown
+</script>
+<script language="VBScript" for="document" event="onmousemove">
+DocMouseMove
+</script>
+<script language="VBScript" for="document" event="onmouseup">
+DocMouseUp
+</script>
+<script language="VBScript" for="btnClose" event="onclick">
+CloseAll
+</script>
+<script language="VBScript" for="btnOpen" event="onclick">
+OpenBrowser
+</script>
+<script language="VBScript" for="btnStop" event="onclick">
+CloseAll
+</script>
+</body>
+</html>

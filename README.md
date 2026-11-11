@@ -2,7 +2,9 @@
 
 A Vietnamese-first, pastel 3D kart racer built with Three.js and Rapier. Race three laps against five AI rivals, drift for boosts, collect round candy orbs and use seven playful power-ups. Six baby animal drivers have distinct kart colors, silhouettes and balanced handling.
 
-This remains a **single-player prototype**. It does not connect to Google or Telegram accounts and has no online multiplayer server; those features were intentionally deferred. Settings and race results are stored locally in the browser.
+The race simulation is currently single-player against AI. An online Firebase room lobby is available for creating rooms and seeing other players; real-time synchronized racing is still to be implemented. The game does not connect to Google or Telegram accounts. Settings and race results are stored locally in the browser.
+
+The online-room lobby uses Firebase Anonymous Authentication and Cloud Firestore. Before using it on GitHub Pages, enable Anonymous sign-in, publish the included `firestore.rules` in Firebase Console, and add the Pages host (`thientinpham8-source.github.io`) under Authentication → Settings → Authorized domains. The lobby currently supports creating/joining rooms and live player lists; synchronized races are not implemented yet.
 
 ## Run
 

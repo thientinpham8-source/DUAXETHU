@@ -358,6 +358,17 @@ html[lang='en'] .logo-sub {
   paint-order: stroke fill;
   min-height: 1em;
 }
+.room-panel { max-height: 84vh; overflow: auto; }
+.room-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.room-join { display: grid; gap: 6px; font: 800 13px var(--display); }
+.room-join input { width: 150px; border: 3px solid var(--ink); border-radius: 12px; padding: 11px 12px; font: 800 18px var(--display); letter-spacing: .12em; text-transform: uppercase; }
+.room-code-card { display: flex; align-items: center; gap: 14px; padding: 16px; border: 3px solid var(--ink); border-radius: 16px; background: #fff3c7; }
+.room-code-card strong { font: 900 28px var(--display); letter-spacing: .18em; }
+.room-status { min-height: 1.5em; font-weight: 700; }
+.room-status.error { color: #b32646; }
+.room-list, .room-members { list-style: none; padding: 0; display: grid; gap: 8px; }
+.room-list li, .room-members li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,.75); }
+.room-members b { text-align: right; }
 .prompts {
   position: absolute;
   right: calc(28px + var(--safe-r));

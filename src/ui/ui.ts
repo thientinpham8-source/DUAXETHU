@@ -5,13 +5,15 @@ import { insertEntry, type Locale, type Quality, type SaveData, type SaveStore }
 import { ROSTER, characterById } from '../game/characters'
 import { ITEM_KINDS, type ItemKind, type TrackTheme } from '../game/config'
 import type { Hint, HudState, RaceResult } from '../game/game'
+import type { PublicRoom, RoomState } from '../engine/rooms'
 import { formatTime, ordinalSuffix } from '../game/rules'
 import { ICON, ITEM_ICONS, PAD_GLYPH, keyCap } from './icons'
 
-export type Screen = 'boot' | 'title' | 'select' | 'hud' | 'pause' | 'settings' | 'leaderboard' | 'about' | 'results'
+export type Screen = 'boot' | 'title' | 'room' | 'select' | 'hud' | 'pause' | 'settings' | 'leaderboard' | 'about' | 'results'
 
 export type UiActions = {
   race(): void
+  roomAction(action: 'create' | 'join' | 'leave', code: string): void
   selectChanged(id: string): void
   startRace(id: string, track: TrackTheme): void
   trackChanged(track: TrackTheme): void
@@ -57,6 +59,7 @@ export class Ui {
   private resultSaved = false
   private tutorialShown = false
   private lastHud?: HudState
+  private roomState: RoomState = { rooms: [], busy: true }
 
   constructor(
     root: HTMLElement,
@@ -100,6 +103,7 @@ export class Ui {
           <p class="tagline" data-i18n="game.tagline"></p>
           <nav class="menu">
             <button class="btn btn-primary btn-big" data-nav data-act="race">${ICON.flag}<span data-i18n="menu.race"></span></button>
+            <button class="btn" data-nav data-act="rooms"><span data-i18n="room.menu"></span></button>
             <button class="btn" data-nav data-act="leaderboard">${ICON.trophy}<span data-i18n="menu.leaderboard"></span></button>
             <button class="btn" data-nav data-act="settings">${ICON.gear}<span data-i18n="menu.settings"></span></button>
             <button class="btn" data-nav data-act="about"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span data-i18n="menu.about"></span></button>
@@ -110,6 +114,7 @@ export class Ui {
         <p class="credits" data-i18n="credits.fonts"></p>
       </section>`),
     )
+    add('room', h(`<section><div class="panel modal wide room-panel"><h2 class="panel-title" data-i18n="room.title"></h2><div data-room-content></div><div class="modal-actions"><button class="btn" data-nav data-act="back"><span data-i18n="menu.back"></span></button></div></div></section>`))
     add(
       'select',
       h(`<section>
@@ -197,6 +202,26 @@ export class Ui {
         this.audio.play(sfx)
         this.actions.race()
         break
+      case 'rooms':
+        this.audio.play(sfx)
+        this.renderRooms(this.roomState)
+        this.show('room')
+        break
+      case 'room-create':
+        this.actions.roomAction('create', '')
+        break
+      case 'room-join':
+        this.actions.roomAction('join', (this.current().querySelector<HTMLInputElement>('[data-room-code]')?.value ?? '').trim().toUpperCase())
+        break
+      case 'room-leave':
+        this.actions.roomAction('leave', this.roomState.current?.code ?? '')
+        break
+      case 'room-join-public':
+        this.actions.roomAction('join', el.dataset.code ?? '')
+        break
+      case 'room-copy':
+        void navigator.clipboard?.writeText(this.roomState.current?.code ?? '')
+        break
       case 'leaderboard':
         this.audio.play(sfx)
         this.renderBoard()
@@ -205,6 +230,10 @@ export class Ui {
       case 'about':
         this.audio.play(sfx)
         this.show('about')
+        break
+      case 'room':
+        this.actions.roomAction('leave', this.roomState.current?.code ?? '')
+        this.show('title')
         break
       case 'settings':
         this.audio.play(sfx)
@@ -272,6 +301,10 @@ export class Ui {
       case 'about':
         this.show('title')
         break
+      case 'room':
+        this.actions.roomAction('leave', this.roomState.current?.code ?? '')
+        this.show('title')
+        break
       case 'select':
         this.actions.backToTitle()
         break
@@ -301,6 +334,29 @@ export class Ui {
 
   setBootProgress(p: number): void {
     ;(this.q('boot', '.boot-bar i') as HTMLElement).style.width = `${Math.round(p * 100)}%`
+  }
+
+  setRoomState(state: RoomState): void {
+    this.roomState = state
+    if (this.screen === 'room') this.renderRooms(state)
+  }
+
+  private renderRooms(state: RoomState): void {
+    const root = this.screens.get('room')?.querySelector<HTMLElement>('[data-room-content]')
+    if (!root) return
+    if (state.current) {
+      const room = state.current
+      const members = room.members.map(m => `<li><span>${esc(m.name)}${m.uid === state.user?.uid ? ` (${esc(this.t('room.you'))})` : ''}</span><b>${esc(this.t(`char.${characterById(m.character).id}.name`))}${m.host ? ` · ${esc(this.t('room.host'))}` : ''}</b></li>`).join('')
+      root.innerHTML = `<div class="room-code-card"><span>${esc(this.t('room.code'))}</span><strong>${esc(room.code)}</strong><button class="btn btn-small" data-act="room-copy">${esc(this.t('room.copy'))}</button></div><p class="room-status">${esc(this.t('room.waiting'))}</p><ul class="room-members">${members || `<li>${esc(this.t('room.loading'))}</li>`}</ul><div class="room-actions"><button class="btn btn-primary" data-act="room-leave">${esc(this.t('room.leave'))}</button></div>`
+      if (state.error) root.insertAdjacentHTML('afterbegin', `<p class="room-status error">${esc(state.error)}</p>`)
+      return
+    }
+    const error = state.error ? `<p class="room-status error">${esc(state.error)}</p>` : ''
+    const roomRows = state.rooms.map((room: PublicRoom) => `<li><span><b>${esc(room.code)}</b> · ${esc(room.hostName)} · ${room.count}/6</span><button class="btn btn-small" data-act="room-join-public" data-code="${esc(room.code)}">${esc(this.t('room.join'))}</button></li>`).join('')
+    const previousCode = root.querySelector<HTMLInputElement>('[data-room-code]')?.value ?? ''
+    root.innerHTML = `<div class="room-actions"><button class="btn btn-primary" data-act="room-create" ${state.busy ? 'disabled' : ''}>${esc(this.t('room.create'))}</button><label class="room-join"><span>${esc(this.t('room.code'))}</span><input data-room-code maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC234"></label><button class="btn" data-act="room-join" ${state.busy ? 'disabled' : ''}>${esc(this.t('room.join'))}</button></div>${error}<p class="room-status">${esc(state.busy ? this.t('room.connecting') : this.t('room.help'))}</p><h3>${esc(this.t('room.open'))}</h3><ul class="room-list">${roomRows || `<li>${esc(this.t('room.empty'))}</li>`}</ul>`
+    const input = root.querySelector<HTMLInputElement>('[data-room-code]')
+    if (input) input.value = previousCode
   }
 
   setPortraits(map: Map<string, string>): void {

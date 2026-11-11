@@ -4,6 +4,7 @@ import { I18n, resolveLocale } from './engine/i18n'
 import { Input } from './engine/input'
 import { GameLoop } from './engine/loop'
 import { SAVE_KEY, SaveStore, type SaveData } from './engine/save'
+import { RoomService } from './engine/rooms'
 import type { Game } from './game/game'
 import type { TrackTheme } from './game/config'
 import { TouchControls } from './ui/touch'
@@ -16,6 +17,7 @@ async function boot(): Promise<void> {
   const i18n = new I18n(resolveLocale(save.data.locale, navigator.languages))
   const input = new Input()
   const audio = new Audio()
+  const rooms = new RoomService()
   let game: Game | undefined
   let lastCharacter = save.data.character
   let selectedTrack: TrackTheme = 'candy'
@@ -69,6 +71,16 @@ async function boot(): Promise<void> {
       game?.showSelect(save.data.character)
       ui.show('select')
     },
+    roomAction: (action, code) => {
+      if (action === 'leave') {
+        void rooms.leave()
+        return
+      }
+      const task = action === 'create'
+        ? rooms.create(save.data.playerName, save.data.character, selectedTrack)
+        : rooms.join(code, save.data.playerName, save.data.character)
+      void task
+    },
     selectChanged: id => game?.showSelect(id),
     trackChanged: track => {
       selectedTrack = track
@@ -94,6 +106,7 @@ async function boot(): Promise<void> {
       if (qualityChanged) game?.setQuality(save.data.quality)
     },
   })
+  rooms.subscribe(state => ui.setRoomState(state))
   ui.show('boot')
   applySettings(save.data)
 

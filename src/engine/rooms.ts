@@ -8,7 +8,7 @@ import type { TrackTheme } from '../game/config'
 
 // Firebase Web config is public app metadata. Access is restricted by Authentication and Rules.
 const app = initializeApp({
-  apiKey: 'AIzaSyC9sm8iN-K4-bP+E29X_0ivXX4Di_i8l30',
+  apiKey: 'AIzaSyC9sm8iN-K4-bPtE29X_0ivXX4Di_i8l30',
   authDomain: 'duaxethu.firebaseapp.com',
   projectId: 'duaxethu',
   storageBucket: 'duaxethu.firebasestorage.app',

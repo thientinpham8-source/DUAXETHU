@@ -1,8 +1,8 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, signInAnonymously, type User } from 'firebase/auth'
 import {
-  collection, doc, getFirestore, limit, onSnapshot, query, runTransaction,
-  serverTimestamp, where, type Unsubscribe,
+  collection, doc, getFirestore, limit, onSnapshot, query, runTransaction, serverTimestamp,
+  updateDoc, where, type Unsubscribe,
 } from 'firebase/firestore'
 import type { TrackTheme } from '../game/config'
 
@@ -16,9 +16,9 @@ const app = initializeApp({
   appId: '1:1083065068364:web:704223ddadcf12db943de9',
 })
 
-export type RoomMember = { uid: string; name: string; character: string; host: boolean }
+export type RoomMember = { uid: string; name: string; character: string; host: boolean; ready: boolean; selected: boolean }
 export type PublicRoom = { code: string; hostName: string; count: number; track: TrackTheme }
-export type RoomView = { code: string; hostUid: string; track: TrackTheme; members: RoomMember[] }
+export type RoomView = { code: string; hostUid: string; track: TrackTheme; phase: 'waiting' | 'selecting' | 'racing'; members: RoomMember[] }
 export type RoomState = { user?: User; rooms: PublicRoom[]; current?: RoomView; busy: boolean; error?: string }
 
 const db = getFirestore(app)
@@ -81,7 +81,7 @@ export class RoomService {
       await runTransaction(db, async tx => {
         if ((await tx.get(roomRef)).exists()) throw new Error('Mã phòng vừa được sử dụng. Hãy tạo lại phòng.')
         tx.set(roomRef, { code, hostUid: user.uid, hostName: safeName(name), status: 'waiting', track, memberCount: 1, createdAt: serverTimestamp() })
-        tx.set(memberRef, { uid: user.uid, name: safeName(name), character, host: true, joinedAt: serverTimestamp() })
+        tx.set(memberRef, { uid: user.uid, name: safeName(name), character, host: true, ready: false, selected: false, joinedAt: serverTimestamp() })
       })
       this.watchRoom(code)
     })
@@ -99,7 +99,7 @@ export class RoomService {
         if (!room.exists() || room.data().status !== 'waiting') throw new Error('Không tìm thấy phòng đang chờ.')
         const members = await tx.get(memberRef)
         if (!members.exists() && Number(room.data().memberCount ?? 0) >= 6) throw new Error('Phòng đã đủ 6 người.')
-        tx.set(memberRef, { uid: user.uid, name: safeName(name), character, host: false, joinedAt: serverTimestamp() })
+        tx.set(memberRef, { uid: user.uid, name: safeName(name), character, host: false, ready: false, selected: false, joinedAt: serverTimestamp() })
         if (!members.exists()) tx.update(roomRef, { memberCount: Number(room.data().memberCount ?? 0) + 1 })
       })
       this.watchRoom(code)
@@ -128,6 +128,32 @@ export class RoomService {
     }
   }
 
+  async setReady(ready: boolean): Promise<void> {
+    const user = await this.requireUser()
+    const code = this.currentCode
+    if (!code || this.state.current?.phase !== 'waiting') return
+    await this.withBusy(() => updateDoc(doc(db, 'rooms', code, 'members', user.uid), { ready }))
+  }
+
+  async startSelection(): Promise<void> {
+    const room = this.state.current
+    if (!room || room.hostUid !== this.state.user?.uid || room.phase !== 'waiting' || !room.members.length || room.members.some(member => !member.ready)) return
+    await this.withBusy(() => updateDoc(doc(db, 'rooms', room.code), { status: 'selecting' }))
+  }
+
+  async selectCharacter(character: string): Promise<void> {
+    const user = await this.requireUser()
+    const code = this.currentCode
+    if (!code || this.state.current?.phase !== 'selecting') return
+    await this.withBusy(() => updateDoc(doc(db, 'rooms', code, 'members', user.uid), { character, selected: true }))
+  }
+
+  async startRace(): Promise<void> {
+    const room = this.state.current
+    if (!room || room.hostUid !== this.state.user?.uid || room.phase !== 'selecting' || !room.members.length || room.members.some(member => !member.selected)) return
+    await this.withBusy(() => updateDoc(doc(db, 'rooms', room.code), { status: 'racing' }))
+  }
+
   private watchRoom(code: string): void {
     this.stopRoomWatch()
     this.currentCode = code
@@ -139,10 +165,10 @@ export class RoomService {
         return
       }
       const data = snapshot.data()
-      this.update({ current: { code, hostUid: String(data.hostUid), track: data.track === 'halloween' ? 'halloween' : 'candy', members: this.state.current?.code === code ? this.state.current.members : [] } })
+      this.update({ current: { code, hostUid: String(data.hostUid), track: data.track === 'halloween' ? 'halloween' : 'candy', phase: data.status === 'selecting' || data.status === 'racing' ? data.status : 'waiting', members: this.state.current?.code === code ? this.state.current.members : [] } })
     }, error => this.update({ error: this.describe(error) }))
     this.membersOff = onSnapshot(collection(roomRef, 'members'), snapshot => {
-      const members = snapshot.docs.map(item => ({ uid: item.id, name: String(item.data().name ?? 'PLAYER'), character: String(item.data().character ?? 'bunny'), host: item.data().host === true }))
+      const members = snapshot.docs.map(item => ({ uid: item.id, name: String(item.data().name ?? 'PLAYER'), character: String(item.data().character ?? 'bunny'), host: item.data().host === true, ready: item.data().ready === true, selected: item.data().selected === true }))
       if (this.state.current?.code === code) this.update({ current: { ...this.state.current, members } })
     }, error => this.update({ error: this.describe(error) }))
   }

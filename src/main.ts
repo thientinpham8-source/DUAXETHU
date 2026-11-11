@@ -81,6 +81,14 @@ async function boot(): Promise<void> {
         : rooms.join(code, save.data.playerName, save.data.character)
       void task
     },
+    roomReady: ready => { void rooms.setReady(ready) },
+    roomStartSelection: () => { void rooms.startSelection() },
+    roomSelectCharacter: character => {
+      save.update({ character })
+      lastCharacter = character
+      void rooms.selectCharacter(character)
+    },
+    roomStartRace: () => { void rooms.startRace() },
     selectChanged: id => game?.showSelect(id),
     trackChanged: track => {
       selectedTrack = track
@@ -106,7 +114,16 @@ async function boot(): Promise<void> {
       if (qualityChanged) game?.setQuality(save.data.quality)
     },
   })
-  rooms.subscribe(state => ui.setRoomState(state))
+  let lastRoomPhase: string | undefined
+  rooms.subscribe(state => {
+    ui.setRoomState(state)
+    const phase = state.current?.phase
+    if (phase === 'racing' && lastRoomPhase !== 'racing') {
+      selectedTrack = state.current!.track
+      beginRace(save.data.character, selectedTrack)
+    }
+    lastRoomPhase = phase
+  })
   window.addEventListener('pagehide', () => rooms.dispose(), { once: true })
   ui.show('boot')
   applySettings(save.data)

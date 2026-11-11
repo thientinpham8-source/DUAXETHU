@@ -7,17 +7,25 @@ service cloud.firestore {
         && request.resource.data.hostUid == request.auth.uid
         && request.resource.data.status == 'waiting'
         && request.resource.data.memberCount == 1;
-      allow update: if request.auth != null
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount'])
-        && request.resource.data.memberCount >= 1
-        && request.resource.data.memberCount <= 6;
+      allow update: if request.auth != null && (
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount'])
+          && request.resource.data.memberCount >= 1
+          && request.resource.data.memberCount <= 6)
+        || (request.auth.uid == resource.data.hostUid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+          && ((resource.data.status == 'waiting' && request.resource.data.status == 'selecting')
+            || (resource.data.status == 'selecting' && request.resource.data.status == 'racing')))
+      );
       allow delete: if request.auth != null && resource.data.hostUid == request.auth.uid;
 
       match /members/{memberId} {
         allow read: if request.auth != null;
-        allow create, update: if request.auth != null
+        allow create: if request.auth != null
           && request.auth.uid == memberId
           && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'waiting';
+        allow update: if request.auth != null
+          && request.auth.uid == memberId
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.status in ['waiting', 'selecting'];
         allow delete: if request.auth != null
           && (request.auth.uid == memberId
             || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid);

@@ -14,6 +14,10 @@ export type Screen = 'boot' | 'title' | 'room' | 'select' | 'hud' | 'pause' | 's
 export type UiActions = {
   race(): void
   roomAction(action: 'create' | 'join' | 'leave', code: string): void
+  roomReady(ready: boolean): void
+  roomStartSelection(): void
+  roomSelectCharacter(character: string): void
+  roomStartRace(): void
   selectChanged(id: string): void
   startRace(id: string, track: TrackTheme): void
   trackChanged(track: TrackTheme): void
@@ -222,6 +226,22 @@ export class Ui {
       case 'room-copy':
         void navigator.clipboard?.writeText(this.roomState.current?.code ?? '')
         break
+      case 'room-ready': {
+        const member = this.roomState.current?.members.find(m => m.uid === this.roomState.user?.uid)
+        this.actions.roomReady(!(member?.ready ?? false))
+        break
+      }
+      case 'room-start-selection':
+        this.actions.roomStartSelection()
+        break
+      case 'room-confirm-character': {
+        const character = this.current().querySelector<HTMLSelectElement>('[data-room-character]')?.value ?? this.save.data.character
+        this.actions.roomSelectCharacter(character)
+        break
+      }
+      case 'room-start-race':
+        this.actions.roomStartRace()
+        break
       case 'leaderboard':
         this.audio.play(sfx)
         this.renderBoard()
@@ -346,8 +366,31 @@ export class Ui {
     if (!root) return
     if (state.current) {
       const room = state.current
-      const members = room.members.map(m => `<li><span>${esc(m.name)}${m.uid === state.user?.uid ? ` (${esc(this.t('room.you'))})` : ''}</span><b>${esc(this.t(`char.${characterById(m.character).id}.name`))}${m.host ? ` · ${esc(this.t('room.host'))}` : ''}</b></li>`).join('')
-      root.innerHTML = `<div class="room-code-card"><span>${esc(this.t('room.code'))}</span><strong>${esc(room.code)}</strong><button class="btn btn-small" data-act="room-copy">${esc(this.t('room.copy'))}</button></div><p class="room-status">${esc(this.t('room.waiting'))}</p><ul class="room-members">${members || `<li>${esc(this.t('room.loading'))}</li>`}</ul><div class="room-actions"><button class="btn btn-primary" data-act="room-leave">${esc(this.t('room.leave'))}</button></div>`
+      const me = room.members.find(m => m.uid === state.user?.uid)
+      const isHost = room.hostUid === state.user?.uid
+      const allReady = room.members.length > 0 && room.members.every(m => m.ready)
+      const allSelected = room.members.length > 0 && room.members.every(m => m.selected)
+      const members = room.members.map(m => {
+        const status = room.phase === 'waiting' ? (m.ready ? this.t('room.ready') : this.t('room.notReady')) : (m.selected ? this.t('room.selected') : this.t('room.choosing'))
+        return `<li><span>${esc(m.name)}${m.uid === state.user?.uid ? ` (${esc(this.t('room.you'))})` : ''}<small class="room-member-status">${esc(status)}</small></span><b>${esc(this.t(`char.${characterById(m.character).id}.name`))}${m.host ? ` · ${esc(this.t('room.host'))}` : ''}</b></li>`
+      }).join('')
+      let controls = ''
+      if (room.phase === 'waiting') {
+        controls = `<div class="room-actions"><button class="btn" data-act="room-ready" ${state.busy || !me ? 'disabled' : ''}>${esc(this.t(me?.ready ? 'room.unready' : 'room.readyButton'))}</button>${isHost && allReady ? `<button class="btn btn-primary" data-act="room-start-selection" ${state.busy ? 'disabled' : ''}>${esc(this.t('room.start'))}</button>` : ''}</div><p class="room-status">${esc(allReady ? (isHost ? this.t('room.allReady') : this.t('room.waitHost')) : this.t('room.waiting'))}</p>`
+      } else if (room.phase === 'selecting') {
+        const savedCharacter = me?.character ?? this.save.data.character
+        const options = ROSTER.map(c => `<option value="${esc(c.id)}" ${c.id === savedCharacter ? 'selected' : ''}>${esc(this.t(`char.${c.id}.name`))}</option>`).join('')
+        const selected = root.querySelector<HTMLSelectElement>('[data-room-character]')?.value ?? savedCharacter
+        controls = `<h3>${esc(this.t('room.chooseRacer'))}</h3><div class="room-actions"><label class="room-join"><span>${esc(this.t('select.title'))}</span><select data-room-character>${options}</select></label><button class="btn" data-act="room-confirm-character" ${state.busy || !me ? 'disabled' : ''}>${esc(this.t(me?.selected ? 'room.changeRacer' : 'room.confirmRacer'))}</button>${isHost && allSelected ? `<button class="btn btn-primary" data-act="room-start-race" ${state.busy ? 'disabled' : ''}>${esc(this.t('room.start'))}</button>` : ''}</div><p class="room-status">${esc(allSelected ? (isHost ? this.t('room.allSelected') : this.t('room.waitHost')) : this.t('room.chooseHint'))}</p>`
+        root.innerHTML = `<div class="room-code-card"><span>${esc(this.t('room.code'))}</span><strong>${esc(room.code)}</strong><button class="btn btn-small" data-act="room-copy">${esc(this.t('room.copy'))}</button></div>${controls}<ul class="room-members">${members}</ul><div class="room-actions"><button class="btn" data-act="room-leave">${esc(this.t('room.leave'))}</button></div>`
+        const select = root.querySelector<HTMLSelectElement>('[data-room-character]')
+        if (select) select.value = selected
+        if (state.error) root.insertAdjacentHTML('afterbegin', `<p class="room-status error">${esc(state.error)}</p>`)
+        return
+      } else {
+        controls = `<p class="room-status">${esc(this.t('room.starting'))}</p>`
+      }
+      root.innerHTML = `<div class="room-code-card"><span>${esc(this.t('room.code'))}</span><strong>${esc(room.code)}</strong><button class="btn btn-small" data-act="room-copy">${esc(this.t('room.copy'))}</button></div>${controls}<ul class="room-members">${members || `<li>${esc(this.t('room.loading'))}</li>`}</ul><div class="room-actions"><button class="btn" data-act="room-leave">${esc(this.t('room.leave'))}</button></div>`
       if (state.error) root.insertAdjacentHTML('afterbegin', `<p class="room-status error">${esc(state.error)}</p>`)
       return
     }

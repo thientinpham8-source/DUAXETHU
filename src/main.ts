@@ -107,6 +107,7 @@ async function boot(): Promise<void> {
     },
   })
   rooms.subscribe(state => ui.setRoomState(state))
+  window.addEventListener('pagehide', () => rooms.dispose(), { once: true })
   ui.show('boot')
   applySettings(save.data)
 

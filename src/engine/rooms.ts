@@ -2,7 +2,7 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, signInAnonymously, type User } from 'firebase/auth'
 import {
   collection, doc, getFirestore, limit, onSnapshot, query, runTransaction,
-  serverTimestamp, setDoc, where, type Unsubscribe,
+  serverTimestamp, where, type Unsubscribe,
 } from 'firebase/firestore'
 import type { TrackTheme } from '../game/config'
 
@@ -36,6 +36,13 @@ export class RoomService {
 
   constructor() {
     void this.initialize()
+  }
+
+  dispose(): void {
+    this.roomsOff?.()
+    this.roomsOff = undefined
+    this.stopRoomWatch()
+    this.listeners.clear()
   }
 
   subscribe(listener: (state: RoomState) => void): () => void {

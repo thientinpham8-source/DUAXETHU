@@ -48,6 +48,8 @@ export type ResultRow = { place: number; character: string; time: number; bestLa
 export type RaceResult = { rows: ResultRow[]; place: number; time: number; bestLap: number; character: string }
 
 export type Hint = 'drive' | 'drift' | 'driftRelease' | 'crate' | 'item' | 'shortcut' | 'none'
+export type OnlineRacer = { uid: string; character: string }
+export type RemoteKartPose = { x: number; y: number; z: number; yaw: number; speed: number }
 
 export type GameHooks = {
   banner(kind: 'lap' | 'final' | 'go' | 'finish' | 'wrong', vars?: Record<string, string | number>): void
@@ -71,6 +73,8 @@ export class Game {
   readonly cam = new ChaseCamera()
   readonly track: Track
   racers: Racer[] = []
+  private remoteRacers: Racer[] = []
+  private readonly remotePoses = new Map<string, RemoteKartPose>()
   ordered: Racer[] = []
   player?: Racer
   private physics: Physics
@@ -152,7 +156,13 @@ export class Game {
       this.scene.remove(r.view.root, r.view.shadow, ...r.trails.map(t => t.mesh))
       r.kart.dispose()
     }
+    for (const r of this.remoteRacers) {
+      this.scene.remove(r.view.root, r.view.shadow, ...r.trails.map(t => t.mesh))
+      r.kart.dispose()
+    }
     this.racers = []
+    this.remoteRacers = []
+    this.remotePoses.clear()
     this.ordered = []
     this.player = undefined
     this.items.reset()
@@ -161,24 +171,32 @@ export class Game {
     this.launched.clear()
   }
 
-  private spawn(playerChar: Character | null): void {
+  private spawn(playerChar: Character | null, onlinePlayers: OnlineRacer[] = [], selfUid?: string): void {
     this.clearRace()
     const others = ROSTER.filter(c => c !== playerChar)
-    // Player starts 4th on the grid; AI skill decreases toward the back.
-    const order: (Character | null)[] = []
-    const playerSlot = 3
+    const participants = onlinePlayers.slice(0, CONFIG.race.racers)
+    const selfSlot = selfUid ? participants.findIndex(member => member.uid === selfUid) : -1
+    const multiplayer = selfSlot >= 0
+    // Single player starts fourth. Online racers use the same member order on every client.
+    const playerSlot = multiplayer ? selfSlot : 3
     let k = 0
-    for (let i = 0; i < CONFIG.race.racers; i += 1) order.push(playerChar && i === playerSlot ? playerChar : others[k++ % others.length])
-    order.forEach((c, i) => {
-      const ch = c ?? ROSTER[i]
-      const isPlayer = !!playerChar && i === playerSlot
+    for (let i = 0; i < CONFIG.race.racers; i += 1) {
+      const member = multiplayer ? participants[i] : undefined
+      const isPlayer = multiplayer ? member?.uid === selfUid : !!playerChar && i === playerSlot
+      if (member && !isPlayer) {
+        const r = new Racer(100 + i, characterById(member.character), false, this.physics, this.track, this.track.gridSlot(i), 1, member.uid)
+        this.scene.add(r.view.root, r.view.shadow, ...r.trails.map(t => t.mesh))
+        this.remoteRacers.push(r)
+        continue
+      }
+      const ch = isPlayer ? (multiplayer && member ? characterById(member.character) : playerChar!) : others[k++ % others.length]
       const aiIndex = isPlayer ? 0 : Math.min(SKILLS.length - 1, i > playerSlot ? i - 1 : i)
       const r = new Racer(i, ch, isPlayer, this.physics, this.track, this.track.gridSlot(i), SKILLS[aiIndex])
       this.scene.add(r.view.root, r.view.shadow, ...r.trails.map(t => t.mesh))
       if (isPlayer) this.player = r
       r.aiUseShortcut = Math.random() < CONFIG.ai.shortcutChance[Math.min(4, aiIndex)]
       this.racers.push(r)
-    })
+    }
     this.ordered = [...this.racers]
     this.updateStandings()
   }
@@ -221,10 +239,10 @@ export class Game {
     this.showroom = undefined
   }
 
-  startRace(characterId: string, tutorial: boolean, theme: TrackTheme = 'candy'): void {
+  startRace(characterId: string, tutorial: boolean, theme: TrackTheme = 'candy', onlinePlayers: OnlineRacer[] = [], selfUid?: string): void {
     this.setTrackTheme(theme)
     this.removeShowroom()
-    this.spawn(characterById(characterId))
+    this.spawn(characterById(characterId), onlinePlayers, selfUid)
     this.mode = 'playing'
     this.phase = 'intro'
     this.phaseTime = 0
@@ -325,6 +343,11 @@ export class Game {
     if (racing) this.raceTime += dt
 
     const obstacles = this.items.obstacles()
+    for (const r of this.remoteRacers) {
+      const pose = r.remoteUid ? this.remotePoses.get(r.remoteUid) : undefined
+      if (!pose) continue
+      r.kart.syncRemote(new THREE.Vector3(pose.x, pose.y, pose.z), pose.yaw, pose.speed)
+    }
     for (const r of this.racers) {
       if (r.respawnTime > 0) {
         r.respawnTime -= dt
@@ -387,6 +410,11 @@ export class Game {
     }
     if (this.mode === 'title') this.attractStep(dt)
     this.input.consume('confirm')
+  }
+
+  setRemotePose(uid: string, pose: RemoteKartPose | undefined): void {
+    if (pose && [pose.x, pose.y, pose.z, pose.yaw, pose.speed].every(Number.isFinite)) this.remotePoses.set(uid, pose)
+    else this.remotePoses.delete(uid)
   }
 
   private stepCountdown(): void {
@@ -778,6 +806,10 @@ export class Game {
       r.view.root.visible = !blink
       const trick = this.trick.get(r)
       if (trick !== undefined) r.view.body.rotation.z += easeTrick(trick) * Math.PI * 2 * (r.id % 2 ? 1 : -1)
+    }
+    for (const r of this.remoteRacers) {
+      const near = r.position.distanceToSquared(camPos) < 110 * 110
+      r.animate(alpha, dt, this.time, this.fx, near)
     }
     this.items.animate(dt, this.time)
     this.track.updateVisuals(this.time)

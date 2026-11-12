@@ -2,9 +2,10 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, signInAnonymously, type User } from 'firebase/auth'
 import {
   collection, doc, getFirestore, limit, onSnapshot, query, runTransaction, serverTimestamp,
-  updateDoc, where, type Unsubscribe,
+  setDoc, updateDoc, where, type Unsubscribe,
 } from 'firebase/firestore'
 import type { TrackTheme } from '../game/config'
+import type { RemoteKartPose } from '../game/game'
 
 // Firebase Web config is public app metadata. Access is restricted by Authentication and Rules.
 const app = initializeApp({
@@ -17,6 +18,7 @@ const app = initializeApp({
 })
 
 export type RoomMember = { uid: string; name: string; character: string; host: boolean; ready: boolean; selected: boolean }
+export type RoomPose = RemoteKartPose & { uid: string }
 export type PublicRoom = { code: string; hostName: string; count: number; track: TrackTheme }
 export type RoomView = { code: string; hostUid: string; track: TrackTheme; phase: 'waiting' | 'selecting' | 'racing'; members: RoomMember[] }
 export type RoomState = { user?: User; rooms: PublicRoom[]; current?: RoomView; busy: boolean; error?: string }
@@ -32,7 +34,10 @@ export class RoomService {
   private roomsOff?: Unsubscribe
   private roomOff?: Unsubscribe
   private membersOff?: Unsubscribe
+  private posesOff?: Unsubscribe
   private currentCode?: string
+  private poseListeners = new Set<(poses: RoomPose[]) => void>()
+  private publishingPose = false
 
   constructor() {
     void this.initialize()
@@ -42,6 +47,7 @@ export class RoomService {
     this.roomsOff?.()
     this.roomsOff = undefined
     this.stopRoomWatch()
+    this.poseListeners.clear()
     this.listeners.clear()
   }
 
@@ -49,6 +55,23 @@ export class RoomService {
     this.listeners.add(listener)
     listener(this.state)
     return () => this.listeners.delete(listener)
+  }
+
+  subscribePoses(listener: (poses: RoomPose[]) => void): () => void {
+    this.poseListeners.add(listener)
+    return () => this.poseListeners.delete(listener)
+  }
+
+  async publishPose(pose: RemoteKartPose): Promise<void> {
+    const user = this.state.user
+    const code = this.currentCode
+    if (!user || !code || this.state.current?.phase !== 'racing' || this.publishingPose) return
+    this.publishingPose = true
+    try {
+      await setDoc(doc(db, 'rooms', code, 'poses', user.uid), { ...pose, updatedAt: serverTimestamp() }, { merge: true })
+    } finally {
+      this.publishingPose = false
+    }
   }
 
   private update(patch: Partial<RoomState>): void {
@@ -115,11 +138,13 @@ export class RoomService {
     try {
       const roomRef = doc(db, 'rooms', code)
       const memberRef = doc(roomRef, 'members', user.uid)
+      const poseRef = doc(roomRef, 'poses', user.uid)
       await runTransaction(db, async tx => {
         const [room, member] = await Promise.all([tx.get(roomRef), tx.get(memberRef)])
         if (!room.exists() || !member.exists()) return
         const count = Math.max(0, Number(room.data().memberCount ?? 1) - 1)
         tx.delete(memberRef)
+        tx.delete(poseRef)
         if (room.data().hostUid === user.uid || count === 0) tx.delete(roomRef)
         else tx.update(roomRef, { memberCount: count })
       })
@@ -168,14 +193,22 @@ export class RoomService {
       this.update({ current: { code, hostUid: String(data.hostUid), track: data.track === 'halloween' ? 'halloween' : 'candy', phase: data.status === 'selecting' || data.status === 'racing' ? data.status : 'waiting', members: this.state.current?.code === code ? this.state.current.members : [] } })
     }, error => this.update({ error: this.describe(error) }))
     this.membersOff = onSnapshot(collection(roomRef, 'members'), snapshot => {
-      const members = snapshot.docs.map(item => ({ uid: item.id, name: String(item.data().name ?? 'PLAYER'), character: String(item.data().character ?? 'bunny'), host: item.data().host === true, ready: item.data().ready === true, selected: item.data().selected === true }))
+      const members = snapshot.docs.map(item => ({ uid: item.id, name: String(item.data().name ?? 'PLAYER'), character: String(item.data().character ?? 'bunny'), host: item.data().host === true, ready: item.data().ready === true, selected: item.data().selected === true })).sort((a, b) => a.uid.localeCompare(b.uid))
       if (this.state.current?.code === code) this.update({ current: { ...this.state.current, members } })
+    }, error => this.update({ error: this.describe(error) }))
+    this.posesOff = onSnapshot(collection(roomRef, 'poses'), snapshot => {
+      const poses = snapshot.docs.map(item => {
+        const data = item.data()
+        return { uid: item.id, x: Number(data.x), y: Number(data.y), z: Number(data.z), yaw: Number(data.yaw), speed: Number(data.speed) }
+      }).filter(pose => [pose.x, pose.y, pose.z, pose.yaw, pose.speed].every(Number.isFinite))
+      for (const listener of this.poseListeners) listener(poses)
     }, error => this.update({ error: this.describe(error) }))
   }
 
   private stopRoomWatch(): void {
     this.roomOff?.(); this.roomOff = undefined
     this.membersOff?.(); this.membersOff = undefined
+    this.posesOff?.(); this.posesOff = undefined
     this.currentCode = undefined
   }
 

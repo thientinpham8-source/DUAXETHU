@@ -30,6 +30,22 @@ service cloud.firestore {
           && (request.auth.uid == memberId
             || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid);
       }
+
+      match /poses/{playerId} {
+        allow read: if request.auth != null
+          && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+        allow create, update: if request.auth != null
+          && request.auth.uid == playerId
+          && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(playerId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.status == 'racing'
+          && request.resource.data.keys().hasOnly(['x', 'y', 'z', 'yaw', 'speed', 'updatedAt'])
+          && request.resource.data.x is number
+          && request.resource.data.y is number
+          && request.resource.data.z is number
+          && request.resource.data.yaw is number
+          && request.resource.data.speed is number;
+        allow delete: if request.auth != null && request.auth.uid == playerId;
+      }
     }
   }
 }

@@ -185,6 +185,18 @@ export class KartController {
     this.airTime = 0
   }
 
+  /** Apply a network-controlled visual pose without running local kart physics. */
+  syncRemote(p: THREE.Vector3, yaw: number, speed: number): void {
+    this.prevPosition.copy(this.position)
+    this.prevYaw = this.yaw
+    this.position.copy(p)
+    this.body.setTranslation({ x: p.x, y: p.y, z: p.z }, true)
+    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
+    this.yaw = yaw
+    this.speed = speed
+    this.velocity.set(0, 0, 0)
+  }
+
   /** Start a boost (stacks by keeping the longer time and the stronger power). */
   boost(seconds: number, power = 1): void {
     this.boostTime = Math.max(this.boostTime, seconds)

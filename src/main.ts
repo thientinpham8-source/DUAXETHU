@@ -40,7 +40,9 @@ async function boot(): Promise<void> {
     const tutorial = !save.data.tutorialDone
     ui.resetHud()
     ui.showTutorial(tutorial)
-    game.startRace(id, tutorial, selectedTrack)
+    const room = rooms.state.current?.phase === 'racing' ? rooms.state.current : undefined
+    const character = room?.members.find(member => member.uid === rooms.state.user?.uid)?.character ?? id
+    game.startRace(character, tutorial, selectedTrack, room?.members, rooms.state.user?.uid)
     if (tutorial) save.update({ tutorialDone: true })
     ui.show('hud')
     input.clearPresses()
@@ -124,6 +126,11 @@ async function boot(): Promise<void> {
     }
     lastRoomPhase = phase
   })
+  rooms.subscribePoses(poses => {
+    if (!game || !rooms.state.current || rooms.state.current.phase !== 'racing') return
+    const selfUid = rooms.state.user?.uid
+    for (const pose of poses) if (pose.uid !== selfUid) game.setRemotePose(pose.uid, pose)
+  })
   window.addEventListener('pagehide', () => rooms.dispose(), { once: true })
   ui.show('boot')
   applySettings(save.data)
@@ -192,6 +199,18 @@ async function boot(): Promise<void> {
     },
   })
   loop.start()
+
+  let lastPosePublish = 0
+  window.setInterval(() => {
+    if (ui.screen !== 'hud' || game?.mode !== 'playing' || !game.player || rooms.state.current?.phase !== 'racing') return
+    const now = performance.now()
+    if (now - lastPosePublish < 200) return
+    lastPosePublish = now
+    const { position, yaw, speed } = game.player.kart
+    void rooms.publishPose({ x: position.x, y: position.y, z: position.z, yaw, speed }).catch(error => {
+      console.warn('Unable to sync online kart pose', error)
+    })
+  }, 50)
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) pause()

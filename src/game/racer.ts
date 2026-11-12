@@ -61,12 +61,14 @@ export class Racer {
     track: Track,
     slot: { pos: THREE.Vector3; yaw: number; s: number },
     skill: number,
+    readonly remoteUid?: string,
   ) {
     const spec = specFor(character.stats)
     this.kart = new KartController(physics, spec, slot.pos, slot.yaw, pos => track.surface(track.locate(pos, this.tracker)))
     this.view = buildKart(character)
     this.progress = createProgress(slot.s, track.length)
-    if (!isPlayer) {
+    if (remoteUid) this.kart.collider.setCollisionGroups(0)
+    if (!isPlayer && !remoteUid) {
       this.driver = new SplineDriver({ skill, lane: ((id * 0.37) % 1) * 1.2 - 0.6, bravery: 0.4 + skill * 0.6, wobble: (1 - skill) * 0.5 })
     }
     this.trails = [new Trail(22, 0.35, character.ui, 0.9), new Trail(22, 0.35, character.ui, 0.9)]

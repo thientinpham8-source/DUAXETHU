@@ -34,6 +34,7 @@
   "room.allSelected": "Everyone chose a racer. The host can launch.",
   "room.chooseHint": "Choose and confirm your racer.",
   "room.starting": "The host started the race…",
+  "room.enterRace": "Enter race",
   "menu.leaderboard": "Leaderboard",
   "menu.settings": "Settings",
   "menu.about": "About",

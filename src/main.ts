@@ -31,13 +31,13 @@ async function boot(): Promise<void> {
     }
   }
 
-  const beginRace = (id: string, track?: TrackTheme) => {
+  const beginRace = (id: string, track?: TrackTheme, online = false) => {
     if (!game) return
     if (track) selectedTrack = track
     audio.unlock()
     lastCharacter = id
     save.update({ character: id })
-    const tutorial = !save.data.tutorialDone
+    const tutorial = !online && !save.data.tutorialDone
     ui.resetHud()
     ui.showTutorial(tutorial)
     const room = rooms.state.current?.phase === 'racing' ? rooms.state.current : undefined
@@ -47,6 +47,14 @@ async function boot(): Promise<void> {
     ui.show('hud')
     input.clearPresses()
     loop.resetAccumulator()
+  }
+
+  const enterRoomRace = () => {
+    const room = rooms.state.current
+    if (!room || room.phase !== 'racing') return
+    selectedTrack = room.track
+    const me = room.members.find(member => member.uid === rooms.state.user?.uid)
+    beginRace(me?.character ?? save.data.character, selectedTrack, true)
   }
 
   const pause = () => {
@@ -91,6 +99,7 @@ async function boot(): Promise<void> {
       void rooms.selectCharacter(character)
     },
     roomStartRace: () => { void rooms.startRace() },
+    roomEnterRace: enterRoomRace,
     selectChanged: id => game?.showSelect(id),
     trackChanged: track => {
       selectedTrack = track
@@ -121,8 +130,7 @@ async function boot(): Promise<void> {
     ui.setRoomState(state)
     const phase = state.current?.phase
     if (phase === 'racing' && lastRoomPhase !== 'racing') {
-      selectedTrack = state.current!.track
-      beginRace(save.data.character, selectedTrack)
+      enterRoomRace()
     }
     lastRoomPhase = phase
   })
@@ -171,6 +179,7 @@ async function boot(): Promise<void> {
     },
     save.data.quality,
   )
+  if (rooms.state.current?.phase === 'racing') enterRoomRace()
   applySettings(save.data)
   ui.setTrackOutline(game.track.outline(4))
   const g = game

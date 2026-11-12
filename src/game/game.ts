@@ -244,7 +244,8 @@ export class Game {
     this.removeShowroom()
     this.spawn(characterById(characterId), onlinePlayers, selfUid)
     this.mode = 'playing'
-    this.phase = 'intro'
+    const online = !!selfUid && onlinePlayers.some(member => member.uid === selfUid)
+    this.phase = online ? 'countdown' : 'intro'
     this.phaseTime = 0
     this.raceTime = 0
     this.countdownShown = 4
@@ -255,7 +256,7 @@ export class Game {
     this.tutorial = tutorial
     this.tutorialStep = tutorial ? 'drive' : 'none'
     this.lastPlace = this.player!.place
-    this.cam.mode = 'flyby'
+    this.cam.mode = online ? 'chase' : 'flyby'
     this.cam.resetTime()
     this.cam.snap()
     for (const l of this.scenery.startLights) (l.material as THREE.MeshBasicMaterial).color.set('#3a2440')

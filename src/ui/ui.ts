@@ -18,6 +18,7 @@ export type UiActions = {
   roomStartSelection(): void
   roomSelectCharacter(character: string): void
   roomStartRace(): void
+  roomEnterRace(): void
   selectChanged(id: string): void
   startRace(id: string, track: TrackTheme): void
   trackChanged(track: TrackTheme): void
@@ -242,6 +243,9 @@ export class Ui {
       case 'room-start-race':
         this.actions.roomStartRace()
         break
+      case 'room-enter-race':
+        this.actions.roomEnterRace()
+        break
       case 'leaderboard':
         this.audio.play(sfx)
         this.renderBoard()
@@ -388,7 +392,7 @@ export class Ui {
         if (state.error) root.insertAdjacentHTML('afterbegin', `<p class="room-status error">${esc(state.error)}</p>`)
         return
       } else {
-        controls = `<p class="room-status">${esc(this.t('room.starting'))}</p>`
+        controls = `<p class="room-status">${esc(this.t('room.starting'))}</p><div class="room-actions"><button class="btn btn-primary" data-act="room-enter-race">${esc(this.t('room.enterRace'))}</button></div>`
       }
       root.innerHTML = `<div class="room-code-card"><span>${esc(this.t('room.code'))}</span><strong>${esc(room.code)}</strong><button class="btn btn-small" data-act="room-copy">${esc(this.t('room.copy'))}</button></div>${controls}<ul class="room-members">${members || `<li>${esc(this.t('room.loading'))}</li>`}</ul><div class="room-actions"><button class="btn" data-act="room-leave">${esc(this.t('room.leave'))}</button></div>`
       if (state.error) root.insertAdjacentHTML('afterbegin', `<p class="room-status error">${esc(state.error)}</p>`)
